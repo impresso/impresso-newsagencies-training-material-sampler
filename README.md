@@ -39,10 +39,7 @@ This repository contains scripts and resources for sampling articles from the Im
 ## Prerequisites
 
 - Python 3.8 or higher.
-- Install dependencies:
-  ```bash
-  pip install -r requirements.txt
-  ```
+
 
 ## Notes
 
