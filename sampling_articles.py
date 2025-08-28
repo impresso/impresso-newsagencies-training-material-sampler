@@ -1,7 +1,7 @@
 import random
 import time
-from impresso import DateRange
-from impresso.client import ImpressoClient
+from impresso import DateRange # type: ignore
+from impresso.client import ImpressoClient # type: ignore
 
 # Ensure local directory is importable for helper module
 import os
@@ -17,7 +17,7 @@ from typing import Callable  # added
 # Configuration
 INPUT_NEWSAGENCIES_FILE = "all_newsagencies.txt"
 OUTPUT_JSON_FILE = "newsagencies_by_article.json"
-CLIENT_REFRESH_INTERVAL_SECONDS = 300  # 5 minutes
+CLIENT_REFRESH_INTERVAL_SECONDS = 21600  # 6 hours
 CLIENT_REFRESH_HINT_INTERVAL_SECONDS = 900  # 15 minutes
 
 

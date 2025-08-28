@@ -2,10 +2,10 @@ import os
 import re
 import time
 from typing import Optional, Any
-
-from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from impresso import connect
+ 
+from dotenv import load_dotenv # type: ignore
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError # type: ignore
+from impresso import connect # type: ignore
 import urllib.parse  # added
 
 
