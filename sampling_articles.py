@@ -17,7 +17,7 @@ from typing import Callable  # added
 # Configuration
 INPUT_NEWSAGENCIES_FILE = "all_newsagencies.txt"
 OUTPUT_JSON_FILE = "newsagencies_by_article.json"
-CLIENT_REFRESH_INTERVAL_SECONDS = 300  # 6 hours
+CLIENT_REFRESH_INTERVAL_SECONDS = 27000  # 7.5 hours
 CLIENT_REFRESH_HINT_INTERVAL_SECONDS = 900  # 15 minutes
 
 
