@@ -227,17 +227,22 @@ def sample_impresso_uids(
 
 def _get_impresso_client_lazy():
     """Lazy import to avoid static import issues when running from various contexts."""
+    logger = logging.getLogger(__name__)
     try:
         from testing_client import get_impresso_client  # type: ignore
+        logger.info("Successfully imported get_impresso_client from testing_client.py")
         return get_impresso_client()
-    except Exception:
+    except Exception as e1:
+        logger.warning(f"Failed to import from testing_client.py: {e1}")
         try:
             from getting_client import get_impresso_client  # type: ignore
+            logger.info("Successfully imported get_impresso_client from getting_client.py")
             return get_impresso_client()
-        except Exception as e:
+        except Exception as e2:
+            logger.error(f"Failed to import from getting_client.py: {e2}")
             raise ImportError(
                 "Could not import get_impresso_client from testing_client.py or getting_client.py"
-            ) from e
+            ) from e2
 
 
 def run_all_newsagencies(
@@ -296,13 +301,16 @@ def run_all_newsagencies(
             hrs = time_left // 3600
             mins = (time_left % 3600) // 60
             secs = time_left % 60
-            print(f"Time to client re-creation: {hrs}h {mins}m {secs}s")
+            logger.info(f"Time to client re-creation: {hrs}h {mins}m {secs}s")
             last_hint = now
         # Refresh client if needed
         if now - last_refresh >= CLIENT_REFRESH_INTERVAL_SECONDS:
-            print("Time to client re-creation")
-            logging.getLogger(__name__).info("Refreshing Impresso client due to token TTL")
-            client = _get_impresso_client_lazy()
+            logger.info("Refreshing Impresso client due to token TTL")
+            try:
+                client = _get_impresso_client_lazy()
+                logger.info("Successfully refreshed Impresso client")
+            except Exception as e:
+                logger.error(f"Failed to refresh Impresso client: {e}")
             last_refresh = now
         return client
 
