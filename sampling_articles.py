@@ -17,7 +17,7 @@ from typing import Callable  # added
 # Configuration
 INPUT_NEWSAGENCIES_FILE = "all_newsagencies.txt"
 OUTPUT_JSON_FILE = "newsagencies_by_article.json"
-CLIENT_REFRESH_INTERVAL_SECONDS = 21600  # 6 hours
+CLIENT_REFRESH_INTERVAL_SECONDS = 300  # 6 hours
 CLIENT_REFRESH_HINT_INTERVAL_SECONDS = 900  # 15 minutes
 
 
@@ -229,19 +229,19 @@ def _get_impresso_client_lazy():
     """Lazy import to avoid static import issues when running from various contexts."""
     logger = logging.getLogger(__name__)
     try:
-        from testing_client import get_impresso_client  # type: ignore
-        logger.info("Successfully imported get_impresso_client from testing_client.py")
+        from getting_client import get_impresso_client
+        logger.info("Successfully imported get_impresso_client from getting_client.py")
         return get_impresso_client()
     except Exception as e1:
-        logger.warning(f"Failed to import from testing_client.py: {e1}")
+        logger.warning(f"Failed to import from getting_client.py: {e1}")
         try:
-            from getting_client import get_impresso_client  # type: ignore
+            from getting_client import get_impresso_client 
             logger.info("Successfully imported get_impresso_client from getting_client.py")
             return get_impresso_client()
         except Exception as e2:
             logger.error(f"Failed to import from getting_client.py: {e2}")
             raise ImportError(
-                "Could not import get_impresso_client from testing_client.py or getting_client.py"
+                "Could not import get_impresso_client from getting_client.py or getting_client.py"
             ) from e2
 
 
