@@ -19,6 +19,8 @@ INPUT_NEWSAGENCIES_FILE = "all_newsagencies.txt"
 OUTPUT_JSON_FILE = "newsagencies_by_article.json"
 CLIENT_REFRESH_INTERVAL_SECONDS = 27000  # 7.5 hours
 CLIENT_REFRESH_HINT_INTERVAL_SECONDS = 900  # 15 minutes
+# Refresh a bit before TTL (default 10 minutes), can override via env REFRESH_SAFETY_SECONDS
+REFRESH_SAFETY_SECONDS = int(os.getenv("REFRESH_SAFETY_SECONDS", "600"))
 
 
 def setup_logging(log_filename: str = "sampling_log.txt"):
@@ -66,7 +68,7 @@ logger = setup_logging()
 
 
 def sample_impresso_uids(
-    client: ImpressoClient | Callable[[], ImpressoClient],
+    client: ImpressoClient | Callable[..., ImpressoClient],
     keyword: str,
     start_date: str | None = None,
     end_date: str | None = None,
@@ -99,8 +101,35 @@ def sample_impresso_uids(
     """
     logger = logging.getLogger(__name__)
 
-    def get_c() -> ImpressoClient:
-        return client() if callable(client) else client  # type: ignore
+    # Allow the provider to accept an optional force=True kwarg to refresh
+    def get_c(force: bool = False) -> ImpressoClient:
+        if callable(client):
+            try:
+                return client(force=force)  # type: ignore[arg-type]
+            except TypeError:
+                # Backwards-compatible: provider without 'force' parameter
+                return client()  # type: ignore[misc]
+        return client  # type: ignore[return-value]
+
+    def _is_auth_error(e: Exception) -> bool:
+        status = getattr(e, "status", None)
+        s = str(e).lower()
+        return status == 401 or "401" in s or "unauthorized" in s or "jwt expired" in s
+
+    def _try_api(desc: str, fn: Callable[[], dict]) -> dict:
+        try:
+            return fn()
+        except Exception as e:
+            if _is_auth_error(e):
+                logger.warning(f"Auth error during {desc}; refreshing client and retrying once...")
+                # Force-refresh if provider supports it
+                try:
+                    get_c(force=True)
+                except TypeError:
+                    pass  # provider may not support force
+                # Retry once after refresh
+                return fn()
+            raise
 
     logger.info(f"Starting sampling process for keyword: '{keyword}'")
     logger.debug(
@@ -129,9 +158,12 @@ def sample_impresso_uids(
         logger.info("No date range specified, using all available data.")
 
     try:
-        year_hits = get_c().search.facet(
-            "year", term=keyword, date_range=date_range, limit=200
-        ).raw
+        year_hits = _try_api(
+            "fetch year facets",
+            lambda: get_c().search.facet(
+                "year", term=keyword, date_range=date_range, limit=200
+            ).raw,
+        )
     except Exception as e:
         logger.error(f"Failed to fetch year facets: {e}")
         raise
@@ -157,9 +189,17 @@ def sample_impresso_uids(
 
         # Step 2: For each year, get all newspapers with hits
         logger.info(f"Step 2: Fetching newspaper facets for year {year}")
-        newspapers_raw = get_c().search.facet(
-            "newspaper", term=keyword, date_range=date_range, limit=200
-        ).raw
+        try:
+            newspapers_raw = _try_api(
+                "fetch newspaper facets",
+                lambda yr=year: get_c().search.facet(
+                    "newspaper", term=keyword, date_range=DateRange(f"{yr}-01-01", f"{yr}-12-31"), limit=200
+                ).raw,
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch newspaper facets for {year}: {e}")
+            continue
+
         newspaper_buckets = newspapers_raw.get("data", [])
         logger.info(f"Newspaper facets for {year}: {newspapers_raw}")
 
@@ -181,13 +221,16 @@ def sample_impresso_uids(
                 logger.debug(
                     f"Searching for articles in {newspaper_id} for year {year}"
                 )
-                results = get_c().search.find(
-                    term=keyword,
-                    newspaper_id=newspaper_id,
-                    date_range=date_range,
-                    with_text_contents=False,
-                    limit=limit_per_query,
-                ).raw
+                results = _try_api(
+                    "article search",
+                    lambda nid=newspaper_id, yr=year: get_c().search.find(
+                        term=keyword,
+                        newspaper_id=nid,
+                        date_range=DateRange(f"{yr}-01-01", f"{yr}-12-31"),
+                        with_text_contents=False,
+                        limit=limit_per_query,
+                    ).raw,
+                )
                 hits = results.get("data", [])
                 logger.debug(
                     f"Found {len(hits)} hits for '{newspaper_id}' in {year}. Waiting"
@@ -292,32 +335,43 @@ def run_all_newsagencies(
     last_refresh = time.time()
     last_hint = last_refresh
 
-    def get_client() -> ImpressoClient:
+    def get_client(force: bool = False) -> ImpressoClient:
         nonlocal client, last_refresh, last_hint
         now = time.time()
+
+        # Force-refresh (e.g., after 401/jwt expired)
+        if force:
+            logger.info("Force-refreshing Impresso client due to authentication error")
+            try:
+                client = _get_impresso_client_lazy()
+                last_refresh = now
+                last_hint = now
+                logger.info("Successfully force-refreshed Impresso client")
+            except Exception as e:
+                logger.error(f"Failed to force-refresh Impresso client: {e}")
+            return client
+
         # Periodic hint about time left till refresh
         if now - last_hint >= CLIENT_REFRESH_HINT_INTERVAL_SECONDS:
-            time_left = max(0, CLIENT_REFRESH_INTERVAL_SECONDS - int(now - last_refresh))
+            time_left = max(0, (CLIENT_REFRESH_INTERVAL_SECONDS - REFRESH_SAFETY_SECONDS) - int(now - last_refresh))
             hrs = time_left // 3600
             mins = (time_left % 3600) // 60
             secs = time_left % 60
             logger.info(f"Time to client re-creation: {hrs}h {mins}m {secs}s")
             last_hint = now
-        # Refresh client if needed
-        if now - last_refresh >= CLIENT_REFRESH_INTERVAL_SECONDS:
+
+        # Refresh a bit before TTL to avoid races
+        if now - last_refresh >= (CLIENT_REFRESH_INTERVAL_SECONDS - REFRESH_SAFETY_SECONDS):
             logger.info("Refreshing Impresso client due to token TTL")
             try:
                 client = _get_impresso_client_lazy()
+                last_refresh = now  # only update on success
                 logger.info("Successfully refreshed Impresso client")
             except Exception as e:
                 logger.error(f"Failed to refresh Impresso client: {e}")
-            last_refresh = now
-        return client
+                # Do not update last_refresh so we retry again soon
 
-    # Create initial client
-    client = _get_impresso_client_lazy()
-    last_refresh = time.time()
-    last_hint = last_refresh
+        return client
 
     for idx, agency in enumerate(agencies, start=1):
         # Skip if already processed
@@ -328,7 +382,7 @@ def run_all_newsagencies(
         logger.info(f"[{idx}/{len(agencies)}] Processing agency: {agency}")
         try:
             doc_ids = sample_impresso_uids(
-                get_client,
+                get_client,  # provider can force-refresh on 401
                 keyword=agency,
                 start_date=start_date,
                 end_date=end_date,
